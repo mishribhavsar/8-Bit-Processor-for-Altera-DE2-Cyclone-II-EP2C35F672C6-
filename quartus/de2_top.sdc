@@ -3,12 +3,13 @@
 create_clock -name CLOCK_50 -period 20.000 [get_ports {CLOCK_50}]
 derive_clock_uncertainty
 
-# The core only updates when step_en is high, and step_en pulses at most once
-# every 1 ms (step) or 0.5 s (run). Core-to-core paths therefore get several
-# clock periods; this lets the combinational 8-bit divider/multiplier in the
-# single-cycle datapath meet timing at 50 MHz without a slower clock.
-set_multicycle_path -setup 4 -from [get_registers {processor:u_core|*}] -to [get_registers {processor:u_core|*}]
-set_multicycle_path -hold  3 -from [get_registers {processor:u_core|*}] -to [get_registers {processor:u_core|*}]
+# Both cores only change state when step_en is high, and step_en pulses at
+# most once every 1 ms (step mode) or 0.5 s (run mode). Paths inside each core
+# therefore get several clock periods, which lets the combinational 8-bit
+# multiplier/divider in the datapath meet timing at 50 MHz.
+set cores [get_registers {processor:u_sc|* processor_pipe:u_pl|*}]
+set_multicycle_path -setup 4 -from $cores -to $cores
+set_multicycle_path -hold  3 -from $cores -to $cores
 
 # Asynchronous human inputs and slow visual outputs
 set_false_path -from [get_ports {KEY[*] SW[*]}]

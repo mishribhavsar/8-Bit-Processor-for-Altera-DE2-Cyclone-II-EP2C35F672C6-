@@ -2,28 +2,33 @@
 // -----------------------------------------------------------------------------
 // de2_top.v  --  board wrapper for the Altera DE2 (Cyclone II EP2C35F672C6)
 //
+//   Both cores run side by side on the same program, clock enable and input
+//   port, so you can step them together and compare.
+//
 //   Controls
-//     KEY[0]      reset (hold)  - loads R0 <- SW[7:0], R1 <- SW[15:8], PC <- 0
-//     KEY[1]      single-step   - executes exactly one instruction per press
-//     SW[17]      0 = step mode (KEY[1]),  1 = run mode (~2 instructions/s)
-//     SW[16]      HEX3-0 show  0: R0 R1   1: R2 R3
-//     SW[15:8]    R1 reset value
-//     SW[7:0]     R0 reset value
+//     KEY[0]      reset (hold)
+//     KEY[1]      single step: one clock for both cores
+//     SW[17]      0 = step mode (KEY[1]),  1 = run mode (~2 clocks/s)
+//     SW[16]      displays show  0: single-cycle core   1: pipelined core
+//     SW[15:14]   register shown on HEX1-0 (R0..R3)
+//     SW[7:0]     input port (address 0xFF)
 //
-//   Displays
-//     HEX7-6      PC (address of the next instruction to execute)
-//     HEX5-4      instruction at PC
-//     HEX3-2      R0 (or R2)        HEX1-0  R1 (or R3)
-//     LEDR[7:0]   ALU output for the instruction at PC (value it will write)
-//     LEDG[0..4]  ZF PF CF OF AF    (flag register)
-//     LEDG[7]     run mode          LEDG[8] blinks on every executed instruction
-//
-//   The core runs on CLOCK_50 and advances only when `step_en` pulses for
-//   one clock - no divided or gated clocks.
+//   Displays (for the selected core)
+//     HEX7-6      PC (fetch address)
+//     HEX5-2      instruction in the last stage, "----" for a pipeline bubble
+//     HEX1-0      selected register
+//     LEDR[7:0]   output port (address 0xFE)
+//     LEDR[16]    pipelined core selected     LEDR[17]  HLT reached
+//     LEDG[0..4]  ZF PF CF OF AF
+//     LEDG[5]     forwarding active   LEDG[6]  pipeline flush
+//     LEDG[7]     run mode            LEDG[8]  blinks on every clock step
 // -----------------------------------------------------------------------------
-module de2_top (
+module de2_top #(
+    parameter TICK_DIV = 50_000,        // 1 kHz key sampling at 50 MHz
+    parameter RUN_DIV  = 25_000_000     // ~2 Hz in run mode
+) (
     input         CLOCK_50,
-    input  [3:0]  KEY,          // active low, pressed = 0
+    input  [3:0]  KEY,                  // active low
     input  [17:0] SW,
     output [8:0]  LEDG,
     output [17:0] LEDR,
@@ -35,72 +40,108 @@ module de2_top (
     wire rst = rst_sync[1];
 
     // ---------------- 1 kHz sample tick (debounce) ----------------
-    reg [15:0] ms_cnt = 16'd0;
-    wire       ms_tick = (ms_cnt == 16'd49_999);
-    always @(posedge CLOCK_50) ms_cnt <= ms_tick ? 16'd0 : ms_cnt + 16'd1;
+    reg [31:0] tick_cnt = 0;
+    wire       tick = (tick_cnt == TICK_DIV - 1);
+    always @(posedge CLOCK_50) tick_cnt <= tick ? 0 : tick_cnt + 1;
 
-    // ---------------- KEY[1] step: sync, sample at 1 kHz, edge detect ----------------
+    // ---------------- KEY[1] step ----------------
     reg [1:0] key1_sync = 2'b11;
     reg       key1_q = 1'b1, key1_qq = 1'b1;
     always @(posedge CLOCK_50) begin
         key1_sync <= {key1_sync[0], KEY[1]};
-        if (ms_tick) begin
+        if (tick) begin
             key1_q  <= key1_sync[1];
             key1_qq <= key1_q;
         end
     end
-    // one CLOCK_50-cycle pulse on the press (1 -> 0 transition)
-    wire step_pulse = ms_tick & key1_qq & ~key1_q;
+    wire step_pulse = tick & key1_qq & ~key1_q;      // one cycle per press
 
-    // ---------------- run mode: ~2 Hz tick ----------------
-    reg [24:0] run_cnt = 25'd0;
-    wire       run_tick = (run_cnt == 25'd24_999_999);
-    always @(posedge CLOCK_50) run_cnt <= run_tick ? 25'd0 : run_cnt + 25'd1;
+    // ---------------- run mode ----------------
+    reg [31:0] run_cnt = 0;
+    wire       run_tick = (run_cnt == RUN_DIV - 1);
+    always @(posedge CLOCK_50) run_cnt <= run_tick ? 0 : run_cnt + 1;
 
-    reg [1:0] mode_sync = 2'b00;
-    always @(posedge CLOCK_50) mode_sync <= {mode_sync[0], SW[17]};
-    wire run_mode = mode_sync[1];
+    reg [2:0] sw_sync0 = 0, sw_sync1 = 0;            // SW[17:15] are not timing-critical,
+    always @(posedge CLOCK_50) begin                 // but synchronise the mode switches
+        sw_sync0 <= {SW[17], SW[16], 1'b0};
+        sw_sync1 <= sw_sync0;
+    end
+    wire run_mode = sw_sync1[2];
+    wire sel_pipe = sw_sync1[1];
 
     wire step_en = ~rst & (run_mode ? run_tick : step_pulse);
 
-    // ---------------- processor core ----------------
-    wire [7:0]  pc, instr, alu_result;
-    wire        zf, pf, cf, of, af;
-    wire [31:0] regs;
+    // ---------------- the two cores ----------------
+    wire [7:0]  out_s, out_p, pc_s, pc_p, rpc_s, rpc_p;
+    wire [15:0] ir_s, ir_p;
+    wire        rv_s, rv_p, h_s, h_p, ev_s, ev_p, fw_s, fw_p, fl_s, fl_p;
+    wire [4:0]  fl5_s, fl5_p;                        // {AF, OF, CF, PF, ZF}
+    wire [31:0] regs_s, regs_p;
 
-    processor #(.PROGRAM_FILE("../mem/program.hex")) u_core (
-        .clk        (CLOCK_50),
-        .rst        (rst),
-        .en         (step_en),
-        .init_r0    (SW[7:0]),
-        .init_r1    (SW[15:8]),
-        .pc_out     (pc),
-        .instr      (instr),
-        .alu_result (alu_result),
-        .zf(zf), .pf(pf), .cf(cf), .of(of), .af(af),
-        .regs_flat  (regs)
+    processor #(.PROGRAM_FILE("../mem/program.hex")) u_sc (
+        .clk(CLOCK_50), .rst(rst), .en(step_en), .io_in(SW[7:0]), .io_out(out_s),
+        .pc_out(pc_s), .retire_valid(rv_s), .retire_pc(rpc_s), .retire_instr(ir_s),
+        .halted(h_s), .ex_valid(ev_s), .dbg_fwd(fw_s), .dbg_flush(fl_s),
+        .zf(fl5_s[0]), .pf(fl5_s[1]), .cf(fl5_s[2]), .of(fl5_s[3]), .af(fl5_s[4]),
+        .regs_flat(regs_s)
     );
 
-    // ---------------- activity LED: stretch each step to ~100 ms ----------------
-    reg [22:0] blink = 23'd0;
+    processor_pipe #(.PROGRAM_FILE("../mem/program.hex")) u_pl (
+        .clk(CLOCK_50), .rst(rst), .en(step_en), .io_in(SW[7:0]), .io_out(out_p),
+        .pc_out(pc_p), .retire_valid(rv_p), .retire_pc(rpc_p), .retire_instr(ir_p),
+        .halted(h_p), .ex_valid(ev_p), .dbg_fwd(fw_p), .dbg_flush(fl_p),
+        .zf(fl5_p[0]), .pf(fl5_p[1]), .cf(fl5_p[2]), .of(fl5_p[3]), .af(fl5_p[4]),
+        .regs_flat(regs_p)
+    );
+
+    // ---------------- display mux ----------------
+    wire [7:0]  pc    = sel_pipe ? pc_p   : pc_s;
+    wire [15:0] ir    = sel_pipe ? ir_p   : ir_s;
+    wire        valid = sel_pipe ? ev_p   : ev_s;
+    wire [7:0]  out   = sel_pipe ? out_p  : out_s;
+    wire [4:0]  flags = sel_pipe ? fl5_p  : fl5_s;
+    wire [31:0] regs  = sel_pipe ? regs_p : regs_s;
+    wire        halt  = sel_pipe ? h_p    : h_s;
+    wire        fwd   = sel_pipe & fw_p;
+    wire        flush = sel_pipe & fl_p;
+
+    reg [7:0] reg_show;
+    always @(*) begin
+        case (SW[15:14])
+            2'd0: reg_show = regs[7:0];
+            2'd1: reg_show = regs[15:8];
+            2'd2: reg_show = regs[23:16];
+            default: reg_show = regs[31:24];
+        endcase
+    end
+
+    // ---------------- activity LED ----------------
+    reg [22:0] blink = 0;
     always @(posedge CLOCK_50)
-        if (step_en)        blink <= 23'd5_000_000;
-        else if (blink != 0) blink <= blink - 23'd1;
+        if (step_en)          blink <= 23'd5_000_000;
+        else if (blink != 0)  blink <= blink - 23'd1;
 
-    // ---------------- LEDs ----------------
-    assign LEDG = {(blink != 0), run_mode, 2'b00, af, of, cf, pf, zf};
-    assign LEDR = {10'd0, alu_result};
+    assign LEDG = {(blink != 0), run_mode, flush, fwd, flags};
+    assign LEDR = {halt, sel_pipe, 8'd0, out};
 
-    // ---------------- 7-segment displays ----------------
-    wire [7:0] show_a = SW[16] ? regs[23:16] : regs[7:0];    // R2 : R0
-    wire [7:0] show_b = SW[16] ? regs[31:24] : regs[15:8];   // R3 : R1
+    // ---------------- 7-segment ----------------
+    localparam [6:0] DASH = 7'b0111111;
+    wire [6:0] s7, s6, s5, s4, s3, s2, s1, s0;
+    seg7_hex h7 (.hex(pc[7:4]),        .seg(s7));
+    seg7_hex h6 (.hex(pc[3:0]),        .seg(s6));
+    seg7_hex h5 (.hex(ir[15:12]),      .seg(s5));
+    seg7_hex h4 (.hex(ir[11:8]),       .seg(s4));
+    seg7_hex h3 (.hex(ir[7:4]),        .seg(s3));
+    seg7_hex h2 (.hex(ir[3:0]),        .seg(s2));
+    seg7_hex h1 (.hex(reg_show[7:4]),  .seg(s1));
+    seg7_hex h0 (.hex(reg_show[3:0]),  .seg(s0));
 
-    seg7_hex h7 (.hex(pc[7:4]),     .seg(HEX7));
-    seg7_hex h6 (.hex(pc[3:0]),     .seg(HEX6));
-    seg7_hex h5 (.hex(instr[7:4]),  .seg(HEX5));
-    seg7_hex h4 (.hex(instr[3:0]),  .seg(HEX4));
-    seg7_hex h3 (.hex(show_a[7:4]), .seg(HEX3));
-    seg7_hex h2 (.hex(show_a[3:0]), .seg(HEX2));
-    seg7_hex h1 (.hex(show_b[7:4]), .seg(HEX1));
-    seg7_hex h0 (.hex(show_b[3:0]), .seg(HEX0));
+    assign HEX7 = s7;
+    assign HEX6 = s6;
+    assign HEX5 = valid ? s5 : DASH;
+    assign HEX4 = valid ? s4 : DASH;
+    assign HEX3 = valid ? s3 : DASH;
+    assign HEX2 = valid ? s2 : DASH;
+    assign HEX1 = s1;
+    assign HEX0 = s0;
 endmodule

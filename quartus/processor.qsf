@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------- #
 # processor.qsf -- 8-bit single-cycle processor on the Altera DE2 board
 # Device: Cyclone II EP2C35F672C6      Tool: Quartus II 13.0 SP1 Web Edition
-# Top level: de2_top (board wrapper) -> processor (core)
+# Top level: de2_top (board wrapper) -> processor (single-cycle) + processor_pipe (3-stage)
 # Pin locations from the Terasic DE2 User Manual pin tables.
 # -------------------------------------------------------------------------- #
 
@@ -20,11 +20,12 @@ set_global_assignment -name USE_TIMEQUEST_TIMING_ANALYZER ON
 
 # ---- source files ----
 set_global_assignment -name VERILOG_FILE ../rtl/alu.v
-set_global_assignment -name VERILOG_FILE ../rtl/control_unit.v
+set_global_assignment -name VERILOG_FILE ../rtl/decoder.v
 set_global_assignment -name VERILOG_FILE ../rtl/register_file.v
-set_global_assignment -name VERILOG_FILE ../rtl/pc.v
 set_global_assignment -name VERILOG_FILE ../rtl/instr_rom.v
+set_global_assignment -name VERILOG_FILE ../rtl/data_mem.v
 set_global_assignment -name VERILOG_FILE ../rtl/processor.v
+set_global_assignment -name VERILOG_FILE ../rtl/processor_pipe.v
 set_global_assignment -name VERILOG_FILE ../board/seg7_hex.v
 set_global_assignment -name VERILOG_FILE ../board/de2_top.v
 set_global_assignment -name SDC_FILE de2_top.sdc

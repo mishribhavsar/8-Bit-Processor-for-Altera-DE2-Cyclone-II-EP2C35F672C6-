@@ -1,31 +1,43 @@
-# ModelSim / ModelSim-Altera: run both self-checking testbenches.
+# ModelSim / ModelSim-Altera: run all self-checking testbenches.
 #   GUI:   cd to sim/, then in the transcript:  do run_modelsim.do
 #   Batch: vsim -c -do run_modelsim.do
 # Working directory must be sim/ so "../mem/program.hex" resolves.
 
 if {[file exists work]} { vdel -lib work -all }
 vlib work
-
-vlog -work work ../rtl/alu.v ../rtl/control_unit.v ../rtl/register_file.v \
-                ../rtl/pc.v ../rtl/instr_rom.v ../rtl/processor.v
-vlog -work work ../board/seg7_hex.v ../board/de2_top.v
-vlog -work work +incdir+../tb ../tb/tb_alu.v ../tb/tb_processor.v ../tb/tb_de2_top.v
+set RTL {../rtl/alu.v ../rtl/decoder.v ../rtl/register_file.v ../rtl/instr_rom.v
+         ../rtl/data_mem.v ../rtl/processor.v ../rtl/processor_pipe.v}
 
 # 1) exhaustive ALU check (~1M vectors)
+vlog -work work +incdir+../tb ../rtl/alu.v ../tb/tb_alu.v
 vsim -c work.tb_alu
 run -all
 quit -sim
 
-# 2) board wrapper smoke test (step mode, reads the 7-seg displays back)
+# 2) single-cycle core vs reference model
+vlog -work work +incdir+../tb {*}$RTL ../tb/tb_cpu.v
+vsim -c work.tb_cpu
+run -all
+quit -sim
+
+# 3) pipelined core vs reference model (same testbench, +define+PIPE)
+vlog -work work +incdir+../tb +define+PIPE {*}$RTL ../tb/tb_cpu.v
+vsim -c work.tb_cpu
+run -all
+quit -sim
+
+# 4) board wrapper
+vlog -work work {*}$RTL ../board/seg7_hex.v ../board/de2_top.v ../tb/tb_de2_top.v
 vsim -c work.tb_de2_top
 run -all
 quit -sim
 
-# 3) processor: demo trace + random programs
-vsim work.tb_processor
-add wave -radix hex /tb_processor/clk /tb_processor/rst /tb_processor/en
-add wave -radix hex /tb_processor/pc_out /tb_processor/instr /tb_processor/alu_result
-add wave -radix hex /tb_processor/dut/u_rf/r0 /tb_processor/dut/u_rf/r1 \
-                    /tb_processor/dut/u_rf/r2 /tb_processor/dut/u_rf/r3
-add wave /tb_processor/zf /tb_processor/pf /tb_processor/cf /tb_processor/of /tb_processor/af
-run -all
+# 5) waveforms: pipelined core running the demo program
+vlog -work work +incdir+../tb +define+PIPE {*}$RTL ../tb/tb_cpu.v
+vsim work.tb_cpu
+add wave -radix hex /tb_cpu/clk /tb_cpu/en /tb_cpu/dut/pc_f
+add wave -radix hex /tb_cpu/dut/valid_d /tb_cpu/dut/pc_d /tb_cpu/dut/instr_d
+add wave -radix hex /tb_cpu/dut/valid_e /tb_cpu/dut/pc_e /tb_cpu/dut/instr_e
+add wave /tb_cpu/dut/fwd_a /tb_cpu/dut/fwd_b /tb_cpu/dut/flush_d /tb_cpu/dut/flush_e
+add wave -radix hex /tb_cpu/regs_flat /tb_cpu/io_out
+run 2us
