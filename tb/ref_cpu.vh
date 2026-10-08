@@ -11,6 +11,7 @@ reg [4:0]  m_flags;            // {AF, OF, CF, PF, ZF}
 reg [7:0]  m_out;
 reg [7:0]  m_last_st_addr;     // address of the most recent store (for checks)
 reg        m_last_was_st;
+reg        m_halted;          // HLT has executed
 
 task model_reset;
     integer k;
@@ -18,7 +19,7 @@ task model_reset;
         m_pc = 0; m_flags = 0; m_out = 0;
         for (k = 0; k < 4; k = k + 1)   m_r[k]   = 0;
         for (k = 0; k < 256; k = k + 1) m_mem[k] = 0;
-        m_last_was_st = 0;
+        m_last_was_st = 0; m_halted = 0;
     end
 endtask
 
@@ -68,7 +69,7 @@ task model_step;
                 5'h15: m_pc = imm;                                                     // JMP
                 5'h16: m_pc = m_flags[0] ? imm : m_pc + 1;                             // BEQ
                 5'h17: m_pc = m_flags[0] ? m_pc + 1 : imm;                             // BNE
-                5'h18: m_pc = m_pc;                                                    // HLT
+                5'h18: begin m_pc = m_pc; m_halted = 1; end                           // HLT
                 default: m_pc = m_pc + 1;                                              // NOP / unused
             endcase
         end

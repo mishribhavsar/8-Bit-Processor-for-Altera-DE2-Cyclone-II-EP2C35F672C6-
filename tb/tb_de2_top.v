@@ -4,7 +4,7 @@
 //   1) step mode: reset with SW[7:0] = 10, press KEY[1] five times, read the
 //      7-segment displays back for both cores
 //   2) run mode: run 100 clocks so the demo program finishes, check LEDR = 0x37 (sum 1..10)
-//      and the HLT LED for both cores
+//      and the HLT LED for all three cores
 // -----------------------------------------------------------------------------
 `timescale 1ns/1ps
 module tb_de2_top;
@@ -64,27 +64,27 @@ module tb_de2_top;
         if (steps != 5) begin errors = errors + 1; $display("  ERROR: %0d steps for 5 presses", steps); end
 
         // single-cycle: PC=05, instruction BEQ done (B00B), R0 = 00
-        SW[16] = 1'b0; SW[15:14] = 2'd0; #200;
+        SW[16:15] = 2'd0; SW[14:13] = 2'd0; #200;
         expect_display("05B00B00", "single-cycle");
         // pipelined after 5 clocks: fetching 05, EX holds pc 03 (LDI R2,0 = 8400)
-        SW[16] = 1'b1; #200;
+        SW[16:15] = 2'd1; #200;
         expect_display("05840000", "pipelined");
         // R3 = 0x20 (table pointer) in the single-cycle core
-        SW[16] = 1'b0; SW[15:14] = 2'd3; #200;
+        SW[16:15] = 2'd0; SW[14:13] = 2'd3; #200;
         expect_display("05B00B20", "single-cycle R3");
+        SW[14:13] = 2'd0;
 
         // ---- run mode until both cores reach HLT ----
         SW[17] = 1'b1;
         while (steps < 100) @(posedge CLOCK_50);   // demo needs 57 (single) / 77 (pipelined) clocks
         #10_000;
         SW[17] = 1'b0; #200;
-        SW[16] = 1'b0; #200;
-        if (LEDR[7:0] !== 8'h37 || !LEDR[17]) begin
-            errors = errors + 1; $display("  ERROR: single-cycle LEDR = %h", LEDR); end
-        SW[16] = 1'b1; #200;
-        if (LEDR[7:0] !== 8'h37 || !LEDR[17]) begin
-            errors = errors + 1; $display("  ERROR: pipelined LEDR = %h", LEDR); end
-        $display("  run mode: both cores halted with LEDR[7:0] = %h (sum 1..10 = 0x37)", LEDR[7:0]);
+        for (i = 0; i < 3; i = i + 1) begin
+            SW[16:15] = (i == 2) ? 2'd2 : i; #200;
+            if (LEDR[7:0] !== 8'h37 || !LEDR[17]) begin
+                errors = errors + 1; $display("  ERROR: core %0d LEDR = %h", i, LEDR); end
+        end
+        $display("  run mode: all three cores halted with LEDR[7:0] = %h (sum 1..10 = 0x37)", LEDR[7:0]);
 
         if (errors == 0) $display("tb_de2_top: PASS");
         else             $display("tb_de2_top: FAIL (%0d)", errors);

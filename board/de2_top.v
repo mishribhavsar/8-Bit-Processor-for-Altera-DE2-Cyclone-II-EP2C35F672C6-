@@ -2,25 +2,27 @@
 // -----------------------------------------------------------------------------
 // de2_top.v  --  board wrapper for the Altera DE2 (Cyclone II EP2C35F672C6)
 //
-//   Both cores run side by side on the same program, clock enable and input
-//   port, so you can step them together and compare.
+//   All three cores (single-cycle, 3-stage pipeline, out-of-order) run side
+//   by side on the same program, clock enable and input port, so you can
+//   step them together and compare.
 //
 //   Controls
 //     KEY[0]      reset (hold)
-//     KEY[1]      single step: one clock for both cores
+//     KEY[1]      single step: one clock for all cores
 //     SW[17]      0 = step mode (KEY[1]),  1 = run mode (~2 clocks/s)
-//     SW[16]      displays show  0: single-cycle core   1: pipelined core
-//     SW[15:14]   register shown on HEX1-0 (R0..R3)
+//     SW[16:15]   displays show  00: single-cycle  01: pipelined  1x: out-of-order
+//     SW[14:13]   register shown on HEX1-0 (R0..R3)
 //     SW[7:0]     input port (address 0xFF)
 //
 //   Displays (for the selected core)
 //     HEX7-6      PC (fetch address)
-//     HEX5-2      instruction in the last stage, "----" for a pipeline bubble
+//     HEX5-2      instruction in the last stage (OoO: ROB head), "----" if empty
 //     HEX1-0      selected register
 //     LEDR[7:0]   output port (address 0xFE)
-//     LEDR[16]    pipelined core selected     LEDR[17]  HLT reached
+//     LEDR[16:15] selected core           LEDR[17]  HLT reached
 //     LEDG[0..4]  ZF PF CF OF AF
-//     LEDG[5]     forwarding active   LEDG[6]  pipeline flush
+//     LEDG[5]     forwarding (pipe) / CDB broadcast (OoO)
+//     LEDG[6]     flush (pipe) / mispredict recovery (OoO)
 //     LEDG[7]     run mode            LEDG[8]  blinks on every clock step
 // -----------------------------------------------------------------------------
 module de2_top #(
@@ -61,22 +63,23 @@ module de2_top #(
     wire       run_tick = (run_cnt == RUN_DIV - 1);
     always @(posedge CLOCK_50) run_cnt <= run_tick ? 0 : run_cnt + 1;
 
-    reg [2:0] sw_sync0 = 0, sw_sync1 = 0;            // SW[17:15] are not timing-critical,
-    always @(posedge CLOCK_50) begin                 // but synchronise the mode switches
-        sw_sync0 <= {SW[17], SW[16], 1'b0};
+    reg [2:0] sw_sync0 = 0, sw_sync1 = 0;            // synchronise the mode switches
+    always @(posedge CLOCK_50) begin
+        sw_sync0 <= SW[17:15];
         sw_sync1 <= sw_sync0;
     end
-    wire run_mode = sw_sync1[2];
-    wire sel_pipe = sw_sync1[1];
+    wire       run_mode = sw_sync1[2];
+    wire [1:0] sel      = sw_sync1[1] ? 2'd2 : {1'b0, sw_sync1[0]};   // 0 single, 1 pipe, 2 OoO
 
     wire step_en = ~rst & (run_mode ? run_tick : step_pulse);
 
-    // ---------------- the two cores ----------------
-    wire [7:0]  out_s, out_p, pc_s, pc_p, rpc_s, rpc_p;
-    wire [15:0] ir_s, ir_p;
-    wire        rv_s, rv_p, h_s, h_p, ev_s, ev_p, fw_s, fw_p, fl_s, fl_p;
-    wire [4:0]  fl5_s, fl5_p;                        // {AF, OF, CF, PF, ZF}
-    wire [31:0] regs_s, regs_p;
+    // ---------------- the three cores ----------------
+    wire [7:0]  out_s, out_p, out_o, pc_s, pc_p, pc_o, rpc_s, rpc_p, rpc_o;
+    wire [15:0] ir_s, ir_p, ir_o;
+    wire        rv_s, rv_p, rv_o, h_s, h_p, h_o, ev_s, ev_p, ev_o;
+    wire        fw_s, fw_p, fw_o, fl_s, fl_p, fl_o;
+    wire [4:0]  fl5_s, fl5_p, fl5_o;                 // {AF, OF, CF, PF, ZF}
+    wire [31:0] regs_s, regs_p, regs_o;
 
     processor #(.PROGRAM_FILE("../mem/program.hex")) u_sc (
         .clk(CLOCK_50), .rst(rst), .en(step_en), .io_in(SW[7:0]), .io_out(out_s),
@@ -94,20 +97,28 @@ module de2_top #(
         .regs_flat(regs_p)
     );
 
+    processor_ooo #(.PROGRAM_FILE("../mem/program.hex")) u_oo (
+        .clk(CLOCK_50), .rst(rst), .en(step_en), .io_in(SW[7:0]), .io_out(out_o),
+        .pc_out(pc_o), .retire_valid(rv_o), .retire_pc(rpc_o), .retire_instr(ir_o),
+        .halted(h_o), .ex_valid(ev_o), .dbg_fwd(fw_o), .dbg_flush(fl_o),
+        .zf(fl5_o[0]), .pf(fl5_o[1]), .cf(fl5_o[2]), .of(fl5_o[3]), .af(fl5_o[4]),
+        .regs_flat(regs_o)
+    );
+
     // ---------------- display mux ----------------
-    wire [7:0]  pc    = sel_pipe ? pc_p   : pc_s;
-    wire [15:0] ir    = sel_pipe ? ir_p   : ir_s;
-    wire        valid = sel_pipe ? ev_p   : ev_s;
-    wire [7:0]  out   = sel_pipe ? out_p  : out_s;
-    wire [4:0]  flags = sel_pipe ? fl5_p  : fl5_s;
-    wire [31:0] regs  = sel_pipe ? regs_p : regs_s;
-    wire        halt  = sel_pipe ? h_p    : h_s;
-    wire        fwd   = sel_pipe & fw_p;
-    wire        flush = sel_pipe & fl_p;
+    wire [7:0]  pc    = (sel == 2'd2) ? pc_o   : (sel == 2'd1) ? pc_p   : pc_s;
+    wire [15:0] ir    = (sel == 2'd2) ? ir_o   : (sel == 2'd1) ? ir_p   : ir_s;
+    wire        valid = (sel == 2'd2) ? ev_o   : (sel == 2'd1) ? ev_p   : ev_s;
+    wire [7:0]  out   = (sel == 2'd2) ? out_o  : (sel == 2'd1) ? out_p  : out_s;
+    wire [4:0]  flags = (sel == 2'd2) ? fl5_o  : (sel == 2'd1) ? fl5_p  : fl5_s;
+    wire [31:0] regs  = (sel == 2'd2) ? regs_o : (sel == 2'd1) ? regs_p : regs_s;
+    wire        halt  = (sel == 2'd2) ? h_o    : (sel == 2'd1) ? h_p    : h_s;
+    wire        fwd   = (sel == 2'd2) ? fw_o   : (sel == 2'd1) & fw_p;
+    wire        flush = (sel == 2'd2) ? fl_o   : (sel == 2'd1) & fl_p;
 
     reg [7:0] reg_show;
     always @(*) begin
-        case (SW[15:14])
+        case (SW[14:13])
             2'd0: reg_show = regs[7:0];
             2'd1: reg_show = regs[15:8];
             2'd2: reg_show = regs[23:16];
@@ -122,7 +133,7 @@ module de2_top #(
         else if (blink != 0)  blink <= blink - 23'd1;
 
     assign LEDG = {(blink != 0), run_mode, flush, fwd, flags};
-    assign LEDR = {halt, sel_pipe, 8'd0, out};
+    assign LEDR = {halt, sel, 7'd0, out};
 
     // ---------------- 7-segment ----------------
     localparam [6:0] DASH = 7'b0111111;

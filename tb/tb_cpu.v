@@ -2,6 +2,7 @@
 // tb_cpu.v  --  self-checking testbench for both cores
 //   compile plain        -> tests processor      (single-cycle)
 //   compile with -DPIPE  -> tests processor_pipe (3-stage pipeline)
+//   compile with -DOOO   -> tests processor_ooo  (Tomasulo out-of-order)
 //
 //   An instruction-level reference model (ref_cpu.vh) steps once for every
 //   instruction the DUT retires. Each retirement checks PC and instruction;
@@ -18,6 +19,9 @@
 `ifdef PIPE
   `define DUT_MODULE processor_pipe
   `define DUT_NAME   "processor_pipe (3-stage)"
+`elsif OOO
+  `define DUT_MODULE processor_ooo
+  `define DUT_NAME   "processor_ooo (out-of-order)"
 `else
   `define DUT_MODULE processor
   `define DUT_NAME   "processor (single-cycle)"
@@ -43,6 +47,8 @@ module tb_cpu;
 
     integer errors = 0, checks = 0;
     integer cycles = 0, retired = 0, n_fwd = 0, n_flush_e = 0, n_flush_d = 0;
+    integer n_stall = 0, rob_occ = 0, n_rob_full = 0;
+    integer idle = 0;               // enabled cycles since the last retirement
     reg     trace = 0;
     integer k;
 
@@ -82,13 +88,14 @@ module tb_cpu;
             #4;
             m_last_was_st = 0;
             if (do_rst) begin
-                model_reset;
+                model_reset; idle = 0;
             end else if (do_en) begin
                 cycles = cycles + 1;
 `ifdef PIPE
                 if (dut.valid_d && (dut.fwd_a || dut.fwd_b)) n_fwd = n_fwd + 1;
                 if (dut.flush_e) n_flush_e = n_flush_e + 1;
                 if (dut.flush_d) n_flush_d = n_flush_d + 1;
+                if (dut.md_stall) n_stall = n_stall + 1;
                 if (trace)
                     $display(" %3d | IF %h | ID %s | EX %s | %s%s",
                              cycles, dut.pc_f,
@@ -97,6 +104,17 @@ module tb_cpu;
                              (dut.valid_d && (dut.fwd_a || dut.fwd_b)) ? "fwd " : "    ",
                              dut.flush_e ? "flush IF+ID" : dut.flush_d ? "flush IF" : "");
 `endif
+`ifdef OOO
+                if (dut.flush) n_flush_e = n_flush_e + 1;     // mispredicts
+                rob_occ = rob_occ + dut.count;
+                if (dut.count == 8) n_rob_full = n_rob_full + 1;
+`endif
+                // liveness: a core that stops retiring before HLT is deadlocked
+                if (retire_valid) idle = 0;
+                else begin
+                    idle = idle + 1;
+                    if (idle == 120 && !m_halted) fail("DEADLOCK", idle, 0);
+                end
                 if (retire_valid) begin
                     checks = checks + 1;
                     if (retire_pc    !== m_pc)        fail("RETIRE_PC", retire_pc, m_pc);
@@ -141,7 +159,18 @@ module tb_cpu;
         end
     endtask
 
-    task stats_reset; begin cycles = 0; retired = 0; n_fwd = 0; n_flush_e = 0; n_flush_d = 0; end endtask
+    task stats_reset; begin cycles = 0; retired = 0; n_fwd = 0; n_flush_e = 0; n_flush_d = 0;
+                            n_stall = 0; rob_occ = 0; n_rob_full = 0; end endtask
+
+    task print_stats; begin
+`ifdef PIPE
+        $display("   forwards %0d, IF+ID flushes %0d, IF flushes %0d, MUL/DIV stall cycles %0d",
+                 n_fwd, n_flush_e, n_flush_d, n_stall);
+`elsif OOO
+        $display("   mispredict flushes %0d, avg ROB occupancy %0d.%01d, ROB-full cycles %0d",
+                 n_flush_e, rob_occ / (cycles ? cycles : 1), (rob_occ * 10 / (cycles ? cycles : 1)) % 10, n_rob_full);
+`endif
+    end endtask
 
     // run until HLT retires (plus a few cycles), return with en low
     task run_to_halt(input integer max_cycles);
@@ -187,9 +216,9 @@ module tb_cpu;
         check_memory;
         $display(" OUT = %h, R0..R3 = %h %h %h %h", io_out,
                  regs_flat[7:0], regs_flat[15:8], regs_flat[23:16], regs_flat[31:24]);
-        $display(" %0d instructions in %0d cycles  ->  CPI = %0d.%02d   (forwards %0d, IF+ID flushes %0d, IF flushes %0d)",
-                 ret_demo, cyc_demo, cyc_demo / ret_demo, (cyc_demo * 100 / ret_demo) % 100,
-                 n_fwd, n_flush_e, n_flush_d);
+        $display(" %0d instructions in %0d cycles  ->  CPI = %0d.%02d",
+                 ret_demo, cyc_demo, cyc_demo / ret_demo, (cyc_demo * 100 / ret_demo) % 100);
+        print_stats;
         $display("Test 1 done, errors so far: %0d", errors);
 
         // ---------------- Test 2: directed hazards ----------------
@@ -202,8 +231,8 @@ module tb_cpu;
         if (regs_flat !== 32'hA5_10_10_00) fail("HAZARD REGS", regs_flat, 32'hA5101000);
         if (dut.u_dmem.mem[8'h10] !== 8'h20) fail("HAZARD MEM", dut.u_dmem.mem[8'h10], 8'h20);
         check_memory;
-        $display(" OUT = %h (A5 = pass)  forwards %0d, IF+ID flushes %0d, IF flushes %0d",
-                 io_out, n_fwd, n_flush_e, n_flush_d);
+        $display(" OUT = %h (A5 = pass)", io_out);
+        print_stats;
         $display("Test 2 done, errors so far: %0d", errors);
 
         // ---------------- Test 3: random programs ----------------
@@ -212,15 +241,18 @@ module tb_cpu;
         for (t = 0; t < 300; t = t + 1) begin
             load_random_program;
             cycle(0, 1);
+            io_in = $random;
             for (c = 0; c < 400; c = c + 1) begin
-                io_in = $random;
+`ifndef OOO
+                io_in = $random;   // OoO reads the input port when the load issues, not at commit
+`endif
                 if (($random & 127) == 0) cycle($random, 1);          // occasional reset
                 else                      cycle(($random & 7) != 0, 0); // en ~87%
             end
             check_memory;
         end
-        $display(" %0d instructions retired in %0d enabled cycles (forwards %0d, IF+ID flushes %0d, IF flushes %0d)",
-                 retired, cycles, n_fwd, n_flush_e, n_flush_d);
+        $display(" %0d instructions retired in %0d enabled cycles", retired, cycles);
+        print_stats;
         $display("Test 3 done, errors so far: %0d", errors);
 
         // ---------------- Test 4: hold ----------------

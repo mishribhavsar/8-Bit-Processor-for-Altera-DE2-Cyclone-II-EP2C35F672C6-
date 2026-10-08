@@ -77,7 +77,7 @@ module processor #(
 
     data_mem u_dmem (
         .clk(clk), .rst(rst), .we(en & mem_write),
-        .addr(mem_addr), .wdata(rd_val), .rdata(mem_rdata),
+        .waddr(mem_addr), .raddr(mem_addr), .wdata(rd_val), .rdata(mem_rdata),
         .io_in(io_in), .io_out(io_out)
     );
 

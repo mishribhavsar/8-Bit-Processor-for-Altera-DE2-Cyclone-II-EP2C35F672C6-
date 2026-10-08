@@ -21,6 +21,9 @@
 //       HLT       when it reaches EX the pipeline stops (younger instruction
 //                 squashed, HLT held in EX) until reset
 //
+//   - Multi-cycle MUL/DIV: the iterative muldiv unit takes 9 cycles; the
+//     whole pipeline stalls while a MUL/DIV sits in EX (md_stall).
+//
 //   Writes to architectural state (registers, flags, memory) happen only in
 //   EX, in program order, so retirement order = program order.
 // -----------------------------------------------------------------------------
@@ -114,13 +117,32 @@ module processor_pipe #(
 
     data_mem u_dmem (
         .clk(clk), .rst(rst), .we(en & valid_e & mem_write_e),
-        .addr(mem_addr), .wdata(opa_e), .rdata(mem_rdata),
+        .waddr(mem_addr), .raddr(mem_addr), .wdata(opa_e), .rdata(mem_rdata),
         .io_in(io_in), .io_out(io_out)
     );
 
+    // multi-cycle MUL / DIV (structural/latency hazard -> stall)
+    wire       is_md_e = valid_e && (instr_e[15:11] == 5'h0D || instr_e[15:11] == 5'h0E);
+    wire       md_busy, md_done;
+    wire [7:0] md_y;
+    wire [4:0] md_flags;
+    wire [2:0] md_tag_unused;
+    wire       md_stall = is_md_e & ~md_done;
+
+    muldiv u_md (
+        .clk(clk), .rst(rst), .en(en), .flush(1'b0),
+        .start(is_md_e & ~md_busy), .is_div(instr_e[15:11] == 5'h0E),
+        .a(opa_e), .b(opb_e), .tag_in(3'd0),
+        .ack(is_md_e & md_done),
+        .busy(md_busy), .done(md_done), .result(md_y), .flags(md_flags), .tag(md_tag_unused)
+    );
+
+    wire [7:0] ex_y     = is_md_e ? md_y : alu_y;
+    wire [4:0] ex_flags = is_md_e ? md_flags : {a_af, a_of, a_cf, a_pf, a_zf};
+
     assign wb_data_e = (wb_sel_e == 2'd1) ? imm_e :
-                       (wb_sel_e == 2'd2) ? mem_rdata : alu_y;
-    assign rf_we_e   = valid_e & reg_write_e;
+                       (wb_sel_e == 2'd2) ? mem_rdata : ex_y;
+    assign rf_we_e   = valid_e & reg_write_e & ~md_stall;
 
     register_file u_rf (
         .clk(clk), .rst(rst), .we(en & rf_we_e),
@@ -133,7 +155,7 @@ module processor_pipe #(
     reg [4:0] flags;                                  // {AF, OF, CF, PF, ZF}
     always @(posedge clk) begin
         if (rst)                                 flags <= 5'b00000;
-        else if (en && valid_e && flag_write_e)  flags <= {a_af, a_of, a_cf, a_pf, a_zf};
+        else if (en && valid_e && flag_write_e && !md_stall)  flags <= ex_flags;
     end
     assign {af, of, cf, pf, zf} = flags;
 
@@ -141,7 +163,7 @@ module processor_pipe #(
     wire br_taken_e = valid_e & ((beq_e & zf) | (bne_e & ~zf));
     wire flush_e    = br_taken_e;                             // squash IF + ID
     wire [7:0] target_e = imm_e;
-    wire flush_d    = valid_d & jump_d & ~flush_e;            // squash IF
+    wire flush_d    = valid_d & jump_d & ~flush_e & ~md_stall; // squash IF
     wire halt_now   = valid_e & halt_e;
 
     reg halted_r;                                             // HLT has retired
@@ -157,6 +179,8 @@ module processor_pipe #(
             valid_d <= 1'b0;  pc_d <= 8'h00; instr_d <= 16'h0000;
             valid_e <= 1'b0;  pc_e <= 8'h00; instr_e <= 16'h0000;
             opa_e   <= 8'h00; opb_e <= 8'h00;
+        end else if (en && md_stall) begin
+            // hold every pipeline register while MUL/DIV runs
         end else if (en && halt_now) begin
             valid_d <= 1'b0;                                  // squash; freeze PC and EX
         end else if (en) begin
@@ -181,7 +205,7 @@ module processor_pipe #(
 
     // =========================== observation =================================
     assign pc_out       = pc_f;
-    assign retire_valid = en & valid_e & ~halted_r;
+    assign retire_valid = en & valid_e & ~halted_r & ~md_stall;
     assign retire_pc    = pc_e;
     assign retire_instr = instr_e;
     assign halted       = halt_now;
