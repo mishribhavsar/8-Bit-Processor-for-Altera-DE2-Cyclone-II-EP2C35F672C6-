@@ -1,15 +1,5 @@
 `timescale 1ns/1ps
-// -----------------------------------------------------------------------------
-// processor.v  --  single-cycle core (CPI = 1)
-//
-//   Every enabled clock edge completes one instruction:
-//     fetch IMEM[PC] -> decode -> read Rd/Rs -> ALU / memory -> write-back,
-//     flags, next PC (PC+1, jump/branch target, or PC for HLT)
-//   `en` is a clock enable; the board pulses it for step / slow-run modes.
-//
-//   Port list is identical to processor_pipe.v so the same testbench and
-//   board wrapper drive both cores.
-// -----------------------------------------------------------------------------
+// Single-cycle core: fetch, decode, execute, write-back in one clock (CPI = 1)
 module processor #(
     parameter PROGRAM_FILE = "../mem/program.hex"
 ) (
@@ -31,10 +21,11 @@ module processor #(
     output [31:0] regs_flat       // {R3, R2, R1, R0}
 );
     // ---------------- fetch ----------------
-    reg  [7:0]  pc;
+    wire [7:0]  PC;
+    wire [7:0]  pc_next;
     wire [15:0] instr;
 
-    instr_rom #(.PROGRAM_FILE(PROGRAM_FILE)) u_imem (.addr(pc), .instr(instr));
+    memory #(.PROGRAM_FILE(PROGRAM_FILE)) MEM_inst (.addr(PC), .instr(instr));
 
     // ---------------- decode ----------------
     wire [3:0] alu_op;
@@ -43,7 +34,7 @@ module processor #(
     wire       reg_write, flag_write, mem_write, addr_reg, jump, beq, bne, halt;
     wire       rd_used, rs_used;    // only used by the pipelined core
 
-    decoder u_dec (
+    Controlunit CU_inst (
         .instr(instr), .alu_op(alu_op), .rd(rd), .rs(rs), .imm(imm),
         .reg_write(reg_write), .flag_write(flag_write), .wb_sel(wb_sel),
         .mem_write(mem_write), .addr_reg(addr_reg),
@@ -54,7 +45,7 @@ module processor #(
     // ---------------- register file ----------------
     wire [7:0] rd_val, rs_val, wb_data;
 
-    register_file u_rf (
+    Register REG_inst (
         .clk(clk), .rst(rst), .we(en & reg_write),
         .waddr(rd), .wdata(wb_data),
         .raddr_a(rd), .raddr_b(rs),
@@ -66,7 +57,7 @@ module processor #(
     wire [7:0] alu_y;
     wire       a_zf, a_pf, a_cf, a_of, a_af;
 
-    alu u_alu (
+    ALU ALU_inst (
         .a(rd_val), .b(rs_val), .op(alu_op), .result(alu_y),
         .zf(a_zf), .pf(a_pf), .cf(a_cf), .of(a_of), .af(a_af)
     );
@@ -75,7 +66,7 @@ module processor #(
     wire [7:0] mem_addr = addr_reg ? rs_val : imm;
     wire [7:0] mem_rdata;
 
-    data_mem u_dmem (
+    data_mem DMEM_inst (
         .clk(clk), .rst(rst), .we(en & mem_write),
         .waddr(mem_addr), .raddr(mem_addr), .wdata(rd_val), .rdata(mem_rdata),
         .io_in(io_in), .io_out(io_out)
@@ -94,14 +85,13 @@ module processor #(
 
     // ---------------- next PC ----------------
     wire taken = jump | (beq & zf) | (bne & ~zf);
-    always @(posedge clk) begin
-        if (rst)        pc <= 8'h00;
-        else if (en)    pc <= halt ? pc : (taken ? imm : pc + 8'd1);
-    end
+    assign pc_next = halt ? PC : (taken ? imm : PC + 8'd1);
 
-    assign pc_out       = pc;
+    pc PC_inst (.clk(clk), .rst(rst), .pc_enable(en), .pc_next(pc_next), .PC(PC));
+
+    assign pc_out       = PC;
     assign retire_valid = en;
-    assign retire_pc    = pc;
+    assign retire_pc    = PC;
     assign retire_instr = instr;
     assign halted       = halt;
     assign ex_valid     = 1'b1;

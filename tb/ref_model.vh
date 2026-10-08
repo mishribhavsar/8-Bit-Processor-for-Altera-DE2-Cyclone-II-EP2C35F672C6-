@@ -1,7 +1,7 @@
 // -----------------------------------------------------------------------------
 // ref_model.vh  --  behavioural reference model of the ALU (testbench only)
 //
-//   Written independently of rtl/alu.v: it works on integers and range
+//   Written independently of rtl/ALU.v: it works on integers and range
 //   checks instead of bit tricks, so a shared misunderstanding is unlikely.
 //   Returns {AF, OF, CF, PF, ZF, result[7:0]}  (13 bits)
 // -----------------------------------------------------------------------------

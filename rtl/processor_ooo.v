@@ -1,40 +1,10 @@
 `timescale 1ns/1ps
-// -----------------------------------------------------------------------------
-// processor_ooo.v  --  out-of-order core: Tomasulo + reorder buffer
-//                      with renaming of the FLAGS register
-//
-//   Same ISA and port list as processor.v / processor_pipe.v.
-//
-//   Front end (in order)
-//     fetch buffer -> dispatch: allocate a ROB entry, rename, read operands,
-//     place the instruction in a reservation station.
-//     JMP and backward BEQ/BNE (static BTFN prediction: backward = taken)
-//     redirect fetch at dispatch; HLT stops fetch.
-//
-//   Execution (out of order)
-//     RS_ALU (4)  -> ALU, 1 cycle       ALU ops, CMP, BEQ/BNE resolution
-//     RS_MD  (2)  -> muldiv, 9 cycles   MUL, DIV (iterative, one at a time)
-//     RS_LS  (4)  -> load/store unit    LD/LDR read memory; ST/STR compute
-//                                       address + data (memory written at commit)
-//     Each RS issues its oldest ready entry. One common data bus (CDB) per
-//     cycle, granted to the oldest finished result; the CDB writes the ROB
-//     and wakes up waiting RS entries.
-//
-//   Renaming
-//     RAT has 5 entries: R0-R3 and FLAGS. Every flag-setting instruction is a
-//     producer of a new FLAGS version and BEQ/BNE are consumers, so a CMP ->
-//     BNE pair is tracked exactly like a register dependency, and flag WAW
-//     hazards between back-to-back ALU ops disappear.
-//
-//   Memory ordering (conservative)
-//     Stores write memory only at commit. A load issues only when no older
-//     store is still in the ROB, so no store-to-load forwarding is needed.
-//
-//   Commit (in order, 1 per cycle)
-//     Head of the ROB writes the architectural register file / flags /
-//     memory. A mispredicted branch flushes ROB, RS, RAT and fetch, then
-//     redirects. HLT stops the core.
-// -----------------------------------------------------------------------------
+// Out-of-order core: Tomasulo with an 8-entry reorder buffer
+//   - RAT renames R0-R3 and FLAGS (flags renamed like a 5th register)
+//   - RS_ALU (4) -> ALU, RS_MD (2) -> MUL/DIV, RS_LS (4) -> load/store
+//   - one CDB per cycle, oldest result first; in-order commit
+//   - static BTFN prediction, mispredict recovery at commit
+//   - stores write memory at commit; loads wait for older stores
 module processor_ooo #(
     parameter PROGRAM_FILE = "../mem/program.hex",
     // 1: FLAGS is renamed like a register (default).
@@ -77,7 +47,7 @@ module processor_ooo #(
     reg         stop_fetch;                 // HLT dispatched
     wire [15:0] imem_q;
 
-    instr_rom #(.PROGRAM_FILE(PROGRAM_FILE)) u_imem (.addr(pc), .instr(imem_q));
+    memory #(.PROGRAM_FILE(PROGRAM_FILE)) MEM_inst (.addr(pc), .instr(imem_q));
 
     wire [3:0] d_alu_op;
     wire [1:0] d_rd, d_rs, d_wb_sel;
@@ -85,7 +55,7 @@ module processor_ooo #(
     wire       d_reg_write, d_flag_write, d_mem_write, d_addr_reg;
     wire       d_jump, d_beq, d_bne, d_halt, d_rd_used, d_rs_used;
 
-    decoder u_dec (
+    Controlunit CU_inst (
         .instr(fb_instr), .alu_op(d_alu_op), .rd(d_rd), .rs(d_rs), .imm(d_imm),
         .reg_write(d_reg_write), .flag_write(d_flag_write), .wb_sel(d_wb_sel),
         .mem_write(d_mem_write), .addr_reg(d_addr_reg),
@@ -157,7 +127,7 @@ module processor_ooo #(
     wire        c_fire;                     // commit this cycle
     wire [7:0]  arf_unused_a, arf_unused_b;
 
-    register_file u_rf (
+    Register REG_inst (
         .clk(clk), .rst(rst), .we(c_fire & rob_wr_reg[head]),
         .waddr(rob_rd[head]), .wdata(rob_val[head]),
         .raddr_a(d_rd), .raddr_b(d_rs),
@@ -298,14 +268,14 @@ module processor_ooo #(
     wire [4:0] x_op = ra_op[ra_sel];
     wire [7:0] x_y;
     wire       x_zf, x_pf, x_cf, x_of, x_af;
-    alu u_alu (
+    ALU ALU_inst (
         .a(ra_av[ra_sel]), .b(ra_bv[ra_sel]), .op(x_op[3:0]), .result(x_y),
         .zf(x_zf), .pf(x_pf), .cf(x_cf), .of(x_of), .af(x_af)
     );
     wire x_taken = (x_op == OP_BEQ) ? ra_fv[ra_sel][0] : ~ra_fv[ra_sel][0];
 
     // ---- MUL/DIV unit ----
-    muldiv u_md (
+    muldiv MD_inst (
         .clk(clk), .rst(rst), .en(en), .flush(flush),
         .start(md_issue), .is_div(rm_op[rm_sel] == OP_DIV),
         .a(rm_av[rm_sel]), .b(rm_bv[rm_sel]), .tag_in(rm_tag[rm_sel]),
@@ -318,7 +288,7 @@ module processor_ooo #(
     wire [7:0] l_addr = (l_op == OP_LDR || l_op == OP_STR) ? rl_bv[rl_sel] : rl_imm[rl_sel];
     wire [7:0] l_rdata;
 
-    data_mem u_dmem (
+    data_mem DMEM_inst (
         .clk(clk), .rst(rst), .we(c_fire & rob_store[head]),
         .waddr(rob_st_addr[head]), .wdata(rob_st_data[head]),
         .raddr(l_addr), .rdata(l_rdata),

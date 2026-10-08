@@ -29,11 +29,12 @@ risc8/
 │   ├── processor.v        single-cycle core
 │   ├── processor_pipe.v   3-stage pipelined core
 │   ├── processor_ooo.v    out-of-order core (Tomasulo + ROB + flag renaming)
+│   ├── pc.v               program counter
 │   ├── muldiv.v           iterative MUL/DIV unit (9 cycles)
-│   ├── decoder.v          instruction decoder (shared)
-│   ├── alu.v              15 operations, 5 flags (shared)
-│   ├── register_file.v    4 x 8 (shared)
-│   ├── instr_rom.v        256 x 16 ROM
+│   ├── Controlunit.v      instruction decoder (shared)
+│   ├── ALU.v              15 operations, 5 flags (shared)
+│   ├── Register.v         4 x 8 register file (shared)
+│   ├── memory.v           256 x 16 instruction ROM
 │   └── data_mem.v         256 x 8 RAM + I/O at 0xFE / 0xFF
 ├── bench/          benchmark programs (alu_loop, mul_loop, muldiv_mix)
 ├── board/          DE2 wrapper running all three cores

@@ -1,27 +1,8 @@
 `timescale 1ns/1ps
-// -----------------------------------------------------------------------------
-// decoder.v  --  instruction decoder (shared by the single-cycle and the
-//                pipelined core; the only module that knows the opcodes)
-//
-//   16-bit instruction, 8-bit datapath
-//     R-type : [15:11] opcode  [10:9] Rd  [8:7] Rs  [6:0] 0
-//     I-type : [15:11] opcode  [10:9] Rd  [8]   0   [7:0] imm8
-//
-//   opcode  mnemonic        operation
-//   00-0E   ALU ops         Rd <- Rd op Rs / op Rd   (CMP: flags only)
-//   0F      NOP
-//   10      LDI Rd, imm     Rd <- imm
-//   11      LD  Rd, [imm]   Rd <- M[imm]
-//   12      ST  Rd, [imm]   M[imm] <- Rd
-//   13      LDR Rd, [Rs]    Rd <- M[Rs]
-//   14      STR Rd, [Rs]    M[Rs] <- Rd
-//   15      JMP imm         PC <- imm
-//   16      BEQ imm         if ZF==1: PC <- imm
-//   17      BNE imm         if ZF==0: PC <- imm
-//   18      HLT             PC <- PC (stop)
-//   19-1F   (unused)        executed as NOP
-// -----------------------------------------------------------------------------
-module decoder (
+// Control unit: decodes the 16-bit instruction (shared by all three cores)
+//   R-type: [15:11] op  [10:9] Rd  [8:7] Rs        I-type: [15:11] op  [10:9] Rd  [7:0] imm
+//   00-0E ALU, 0F NOP, 10 LDI, 11 LD, 12 ST, 13 LDR, 14 STR, 15 JMP, 16 BEQ, 17 BNE, 18 HLT
+module Controlunit (
     input  [15:0] instr,
     output [3:0]  alu_op,
     output [1:0]  rd,

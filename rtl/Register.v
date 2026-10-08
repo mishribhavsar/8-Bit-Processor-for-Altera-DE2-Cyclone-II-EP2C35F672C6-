@@ -1,10 +1,6 @@
 `timescale 1ns/1ps
-// -----------------------------------------------------------------------------
-// register_file.v  --  4 x 8-bit register file (R0-R3)
-//   two combinational read ports, one synchronous write port,
-//   synchronous reset to 0 (use LDI to load constants)
-// -----------------------------------------------------------------------------
-module register_file (
+// Register file: 4 x 8-bit (R0-R3), 2 read ports, 1 write port, sync reset
+module Register (
     input         clk,
     input         rst,        // synchronous, active high
     input         we,         // already qualified with the clock enable

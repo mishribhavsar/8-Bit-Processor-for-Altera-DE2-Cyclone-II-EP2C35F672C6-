@@ -25,7 +25,7 @@ module tb_trace_ooo;
 
     initial begin
         $readmemh(`TRACE_FILE, rom);
-        for (k = 0; k < 256; k = k + 1) dut.u_imem.mem[k] = rom[k];
+        for (k = 0; k < 256; k = k + 1) dut.MEM_inst.mem[k] = rom[k];
         @(negedge clk) rst = 0;
         $display("cyc | dispatch (pc:instr ->tag)   | issue                     | CDB      | commit      | ROB");
         repeat (45) begin

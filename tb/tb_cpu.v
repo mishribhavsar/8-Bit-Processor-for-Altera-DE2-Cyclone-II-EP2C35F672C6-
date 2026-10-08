@@ -69,15 +69,15 @@ module tb_cpu;
             if ({af, of, cf, pf, zf} !== m_flags) fail("FLAGS", {af, of, cf, pf, zf}, m_flags);
             if (io_out !== m_out)                 fail("IO_OUT", io_out, m_out);
             if (m_last_was_st && m_last_st_addr < 8'hFE &&
-                dut.u_dmem.mem[m_last_st_addr] !== m_mem[m_last_st_addr])
-                fail("STORE", dut.u_dmem.mem[m_last_st_addr], m_mem[m_last_st_addr]);
+                dut.DMEM_inst.mem[m_last_st_addr] !== m_mem[m_last_st_addr])
+                fail("STORE", dut.DMEM_inst.mem[m_last_st_addr], m_mem[m_last_st_addr]);
         end
     endtask
 
     task check_memory;
         begin
             for (k = 0; k < 254; k = k + 1)
-                if (dut.u_dmem.mem[k] !== m_mem[k]) fail("DMEM", k, m_mem[k]);
+                if (dut.DMEM_inst.mem[k] !== m_mem[k]) fail("DMEM", k, m_mem[k]);
         end
     endtask
 
@@ -142,7 +142,7 @@ module tb_cpu;
     task load_program(input [8*64-1:0] file);
         begin
             $readmemh(file, m_rom);
-            for (k = 0; k < 256; k = k + 1) dut.u_imem.mem[k] = m_rom[k];
+            for (k = 0; k < 256; k = k + 1) dut.MEM_inst.mem[k] = m_rom[k];
         end
     endtask
 
@@ -154,7 +154,7 @@ module tb_cpu;
                 // keep HLT rare so programs run long enough to be interesting
                 if (w[15:11] == 5'h18 && ($random & 3) != 0) w[15:11] = 5'h0F;
                 m_rom[k] = w;
-                dut.u_imem.mem[k] = w;
+                dut.MEM_inst.mem[k] = w;
             end
         end
     endtask
@@ -212,7 +212,7 @@ module tb_cpu;
         if (io_out !== 8'h37) fail("GOLDEN OUT", io_out, 8'h37);
         if (regs_flat !== 32'h2A_00_00_37) fail("GOLDEN REGS", regs_flat, 32'h2A000037);
         for (k = 0; k < 10; k = k + 1)
-            if (dut.u_dmem.mem[8'h20 + k] !== exp_table[k]) fail("GOLDEN TABLE", k, exp_table[k]);
+            if (dut.DMEM_inst.mem[8'h20 + k] !== exp_table[k]) fail("GOLDEN TABLE", k, exp_table[k]);
         check_memory;
         $display(" OUT = %h, R0..R3 = %h %h %h %h", io_out,
                  regs_flat[7:0], regs_flat[15:8], regs_flat[23:16], regs_flat[31:24]);
@@ -229,7 +229,7 @@ module tb_cpu;
         run_to_halt(500);
         if (io_out !== 8'hA5) fail("HAZARD OUT", io_out, 8'hA5);
         if (regs_flat !== 32'hA5_10_10_00) fail("HAZARD REGS", regs_flat, 32'hA5101000);
-        if (dut.u_dmem.mem[8'h10] !== 8'h20) fail("HAZARD MEM", dut.u_dmem.mem[8'h10], 8'h20);
+        if (dut.DMEM_inst.mem[8'h10] !== 8'h20) fail("HAZARD MEM", dut.DMEM_inst.mem[8'h10], 8'h20);
         check_memory;
         $display(" OUT = %h (A5 = pass)", io_out);
         print_stats;

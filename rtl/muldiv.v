@@ -1,19 +1,6 @@
 `timescale 1ns/1ps
-// -----------------------------------------------------------------------------
-// muldiv.v  --  iterative multiply / divide unit (8 cycles per operation)
-//
-//   MUL : shift-and-add,   8 iterations -> 16-bit product, result = low byte
-//   DIV : restoring division, 8 iterations -> 8-bit quotient
-//
-//   Handshake:  start (when idle) -> busy for 8 enabled cycles -> done is
-//   held high with the result until ack. flush cancels a running or finished
-//   operation (used by the out-of-order core on a mispredict).
-//
-//   Flags follow the ISA exactly (same as alu.v):
-//     MUL: CF = OF = (high byte != 0)      DIV: OF = (divisor == 0), result 0
-//     ZF / PF from the result, AF = 0
-//   `tag` is carried through untouched (ROB tag in the out-of-order core).
-// -----------------------------------------------------------------------------
+// Iterative MUL/DIV unit: shift-add multiply / restoring divide, 8 iterations
+// start -> busy -> done (held until ack). Flags match the ALU.
 module muldiv (
     input            clk,
     input            rst,

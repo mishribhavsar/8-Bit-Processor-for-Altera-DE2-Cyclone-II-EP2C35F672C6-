@@ -47,7 +47,7 @@ module tb_bench;
         begin
             $readmemh(file, m_rom);
             for (k = 0; k < 256; k = k + 1) begin
-                u_s.u_imem.mem[k] = m_rom[k]; u_p.u_imem.mem[k] = m_rom[k]; u_o.u_imem.mem[k] = m_rom[k];
+                u_s.MEM_inst.mem[k] = m_rom[k]; u_p.MEM_inst.mem[k] = m_rom[k]; u_o.MEM_inst.mem[k] = m_rom[k];
             end
             io_in = n;
             // reference: run the model to HLT

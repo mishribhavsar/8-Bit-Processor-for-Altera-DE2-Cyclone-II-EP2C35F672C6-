@@ -5,11 +5,11 @@
 
 if {[file exists work]} { vdel -lib work -all }
 vlib work
-set RTL {../rtl/alu.v ../rtl/muldiv.v ../rtl/decoder.v ../rtl/register_file.v ../rtl/instr_rom.v
+set RTL {../rtl/ALU.v ../rtl/pc.v ../rtl/muldiv.v ../rtl/Controlunit.v ../rtl/Register.v ../rtl/memory.v
          ../rtl/data_mem.v ../rtl/processor.v ../rtl/processor_pipe.v ../rtl/processor_ooo.v}
 
 # 1) exhaustive ALU check (~1M vectors)
-vlog -work work +incdir+../tb ../rtl/alu.v ../tb/tb_alu.v
+vlog -work work +incdir+../tb ../rtl/ALU.v ../tb/tb_alu.v
 vsim -c work.tb_alu
 run -all
 quit -sim

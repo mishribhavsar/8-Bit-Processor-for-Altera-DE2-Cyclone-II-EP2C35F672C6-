@@ -11,7 +11,7 @@ module tb_alu;
     wire [7:0] result;
     wire       zf, pf, cf, of, af;
 
-    alu dut (.a(a), .b(b), .op(op), .result(result),
+    ALU dut (.a(a), .b(b), .op(op), .result(result),
              .zf(zf), .pf(pf), .cf(cf), .of(of), .af(af));
 
     `include "ref_model.vh"

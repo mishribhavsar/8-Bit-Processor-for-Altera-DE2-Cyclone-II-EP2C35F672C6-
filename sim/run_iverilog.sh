@@ -2,10 +2,10 @@
 # Run all self-checking testbenches and the CPI benchmark with Icarus Verilog.
 set -e
 cd "$(dirname "$0")"
-RTL="../rtl/alu.v ../rtl/muldiv.v ../rtl/decoder.v ../rtl/register_file.v ../rtl/instr_rom.v ../rtl/data_mem.v ../rtl/processor.v ../rtl/processor_pipe.v ../rtl/processor_ooo.v"
+RTL="../rtl/ALU.v ../rtl/pc.v ../rtl/muldiv.v ../rtl/Controlunit.v ../rtl/Register.v ../rtl/memory.v ../rtl/data_mem.v ../rtl/processor.v ../rtl/processor_pipe.v ../rtl/processor_ooo.v"
 IV="iverilog -g2005 -I../tb"
 
-$IV -o tb_alu.vvp ../rtl/alu.v ../tb/tb_alu.v                && vvp -n tb_alu.vvp
+$IV -o tb_alu.vvp ../rtl/ALU.v ../tb/tb_alu.v                && vvp -n tb_alu.vvp
 $IV -o tb_muldiv.vvp ../rtl/muldiv.v ../tb/tb_muldiv.v       && vvp -n tb_muldiv.vvp
 $IV -o tb_cpu_single.vvp       $RTL ../tb/tb_cpu.v           && vvp -n tb_cpu_single.vvp
 $IV -o tb_cpu_pipe.vvp   -DPIPE $RTL ../tb/tb_cpu.v          && vvp -n tb_cpu_pipe.vvp

@@ -1,18 +1,6 @@
 `timescale 1ns/1ps
-// -----------------------------------------------------------------------------
-// data_mem.v  --  256 x 8 data memory with memory-mapped I/O
-//
-//   0x00-0xFD  RAM            combinational read, write on clock edge
-//   0xFE       OUT port       read/write; drives io_out (LEDs on the board)
-//   0xFF       IN  port       read only; returns io_in (switches on the board)
-//
-//   Separate read and write addresses: the in-order cores tie them together;
-//   the out-of-order core reads for a load while a store commits elsewhere.
-//   Combinational read is what lets LD complete in one cycle (single-cycle
-//   core) and in the EX stage (pipelined core) without a load-use stall.
-//   On Cyclone II this is built from logic cells, since M4K blocks only
-//   support registered reads. Synchronous reset clears RAM and OUT.
-// -----------------------------------------------------------------------------
+// Data memory: 256 x 8, combinational read, write on clock edge
+//   0xFE = output port (LEDs), 0xFF = input port (switches)
 module data_mem (
     input            clk,
     input            rst,

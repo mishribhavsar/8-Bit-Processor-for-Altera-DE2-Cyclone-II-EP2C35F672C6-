@@ -1,21 +1,7 @@
 `timescale 1ns/1ps
-// -----------------------------------------------------------------------------
-// alu.v  --  8-bit ALU, 15 operations + NOP, five status flags
-//
-//   A = Rd (destination / first operand), B = Rs (source / second operand)
-//
-//   Flags (all computed from the current operation):
-//     ZF  zero      : result == 0
-//     PF  parity    : 1 when the result has an even number of 1s (x86 style)
-//     CF  carry     : carry-out (ADD/INC), borrow (SUB/CMP/DEC),
-//                     bit shifted/rotated out (shifts/rotates),
-//                     high byte non-zero (MUL); 0 for logic ops and DIV
-//     OF  overflow  : signed overflow (ADD/SUB/CMP/INC/DEC),
-//                     sign change (LSL), original sign (LSR),
-//                     high byte non-zero (MUL), divide-by-zero (DIV)
-//     AF  auxiliary : carry/borrow between bit 3 and bit 4 (ADD/SUB/CMP/INC/DEC)
-// -----------------------------------------------------------------------------
-module alu (
+// 8-bit ALU: 15 operations + NOP, flags {AF, OF, CF, PF, ZF}
+// a = Rd, b = Rs. PF = even parity, AF = carry/borrow out of bit 3.
+module ALU (
     input      [7:0] a,          // Rd
     input      [7:0] b,          // Rs
     input      [3:0] op,         // operation select (= opcode)
