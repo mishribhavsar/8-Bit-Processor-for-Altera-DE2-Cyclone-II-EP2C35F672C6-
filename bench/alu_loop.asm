@@ -1,4 +1,4 @@
-; alu_loop.asm -- control-heavy loop with no MUL/DIV (sum of 1..N with a table)
+; alu_loop.asm control-heavy loop with no MUL/DIV (sum of 1..N with a table)
 ; same kernel as mem/program.asm, used as the no-latency baseline
         .equ IN     0xFF
         .equ OUT    0xFE
