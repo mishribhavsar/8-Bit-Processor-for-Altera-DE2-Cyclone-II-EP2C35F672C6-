@@ -93,6 +93,7 @@ module tb_bench;
         $display("\n=== CPI comparison (single-cycle has a 1-cycle combinational MUL/DIV;");
         $display("    pipeline and OoO use the 9-cycle iterative MUL/DIV unit) ===");
         run("alu_loop",   "../bench/alu_loop.hex",   8'd20);
+        run("alu_loop",   "../bench/alu_loop.hex",   8'd100);
         run("mul_loop",   "../bench/mul_loop.hex",   8'd20);
         run("muldiv_mix", "../bench/muldiv_mix.hex", 8'd20);
         run("mul_loop",   "../bench/mul_loop.hex",   8'd100);

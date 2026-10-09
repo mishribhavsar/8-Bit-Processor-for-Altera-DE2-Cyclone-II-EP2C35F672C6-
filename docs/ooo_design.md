@@ -58,7 +58,7 @@ With FLAGS in the RAT:
 - **A branch depends only on the specific instruction** whose flags it reads (normally the `CMP` just before it). It wakes up as soon as that `CMP` executes, not when it commits.
 - **WAW on flags disappears,** because each version lives in its own ROB entry.
 
-**Measured:** `FLAG_RENAME = 0` makes branches wait until no flag-setter is in flight. The core then becomes slower than the in-order pipeline, while renaming gives a 1.44–1.88× speed-up over that setting (see README).
+**Measured:** with `FLAG_RENAME = 0`, branches wait until no flag-setter is in flight. The same core's CPI then rises from 1.21–2.23 to 2.00–3.22, slower than the in-order pipeline on all three benchmarks (see README).
 
 ## 5. Control flow and recovery
 
@@ -140,4 +140,4 @@ cyc | dispatch (pc:instr ->tag) | issue          | CDB    | commit     | ROB ent
 4. **Why capture from the CDB during dispatch?** If the producer broadcasts in the same cycle a consumer dispatches, the consumer would otherwise wait for a broadcast that has already happened, and the core deadlocks. (The test catches this as a deadlock.)
 5. **Why must loads wait for older stores?** A store's address may not be known yet, and memory is only written at commit. Reading too early could return stale data. (The test catches this bug.)
 6. **What limits `mul_loop` to about 10 cycles per iteration?** The single unpipelined MUL/DIV unit: 9 cycles plus the CDB handshake. ROB size and dispatch width are not the limit.
-7. **What does flag renaming buy, in numbers?** It's the difference between CPI 3.16 and 1.68 on `mul_loop`, which is 1.88×.
+7. **What does flag renaming buy, in numbers?** On `mul_loop`, the out-of-order core's CPI is 1.68 with it and 3.16 without it. Without it, the core is slower than the in-order pipeline (2.82).

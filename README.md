@@ -8,12 +8,12 @@ An 8-bit RISC processor in Verilog HDL, built as **three microarchitectures of o
 | 3-stage pipeline | `rtl/processor_pipe.v` | IF / ID / EX, forwarding, early JMP resolution, branch flush, stall on the multi-cycle MUL/DIV unit |
 | **Out-of-order** | `rtl/processor_ooo.v` | Tomasulo + reorder buffer, **register renaming that includes the FLAGS register**, 3 reservation stations, common data bus, static BTFN prediction, precise recovery |
 
-**Headline result:** on a multiply-bound loop, the out-of-order core runs **1.67× faster** than the in-order pipeline (CPI 2.82 → 1.68). It reaches the throughput limit of its single 9-cycle multiply/divide unit.
+**Headline result:** across three loop benchmarks, the out-of-order core runs **1.14–1.67× faster** than the in-order pipeline (geometric mean 1.40×). On the multiply-bound loop (CPI 2.82 → 1.68), it reaches the throughput limit of its single 9-cycle multiply/divide unit.
 
-**Why flag renaming matters:** turn it off (an ablation, `FLAG_RENAME = 0`) and the out-of-order core becomes **slower than the in-order pipeline**. With it on, the core is 1.44–1.88× faster. The five x86-style condition flags make every ALU instruction a producer of a new flags value, so renaming FLAGS is what lets out-of-order execution pay off with this ISA.
+**Why flag renaming matters:** with renaming turned off (`FLAG_RENAME = 0`), the same out-of-order core's CPI rises to 2.00–3.22, **slower than the in-order pipeline on all three benchmarks**. The five x86-style condition flags make every ALU instruction a producer of a new flags value, so renaming FLAGS is what lets out-of-order execution pay off with this ISA.
 
 - **ISA:**
-  - 16-bit instructions, 8-bit datapath, 4 registers.
+  - 8-bit datapath, 16-bit instruction encoding, 4 registers.
   - 25 instructions: 15 ALU operations, load/store (direct and register-indirect), LDI, JMP/BEQ/BNE, HLT, NOP.
   - 5 flags (ZF, PF, CF, OF, AF).
   - 256 × 16 instruction ROM, 256 × 8 data RAM, memory-mapped I/O.
@@ -54,7 +54,7 @@ The single-cycle core uses a combinational multiply/divide (CPI = 1, but a very 
 
 | Benchmark (N) | Instr. | Pipeline CPI | OoO CPI | OoO speed-up | OoO CPI, flag renaming **off** |
 |---|---|---|---|---|---|
-| `alu_loop` (20) | 107 | 1.37 | **1.27** | 1.08× | 2.02 |
+| `alu_loop` (100) | 507 | 1.39 | **1.21** | 1.14× | 2.00 |
 | `mul_loop` (100) | 598 | 2.82 | **1.68** | **1.67×** | 3.16 |
 | `muldiv_mix` (100) | 895 | 3.21 | **2.23** | 1.43× | 3.22 |
 
