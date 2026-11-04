@@ -215,5 +215,5 @@ Run `./sim/run_iverilog.sh` (about 40 s), or `do run_modelsim.do` from `sim/` in
   - 3-stage pipeline with forwarding and flushing.
   - Instruction-level reference model and random-program verification.
 - **v1:**
-  - Corrected the original single-cycle lab design: register file wired in; edge-triggered clocking; current-opcode decode; rotate, AF and CMP fixes.
+  - Fixed bugs in my original single-cycle lab design: register file wired in; edge-triggered clocking; current-opcode decode; rotate, AF and CMP fixes.
   - Self-checking testbenches and DE2 pin assignments.
